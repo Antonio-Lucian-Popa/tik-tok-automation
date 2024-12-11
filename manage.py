@@ -28,42 +28,94 @@ options.add_argument("--incognito")  # Deschide browserul într-un mod incognito
 # Creează instanța WebDriver
 driver = webdriver.Chrome(service=service, options=options)
 
-# Restul funcțiilor rămân neschimbate
 def capture_element_screenshot(element, filename):
-    element.screenshot(filename)
+    try:
+        element.screenshot(filename)
+        print(f"[INFO] Captura salvată: {filename}")
+    except Exception as e:
+        print(f"[ERROR] Eroare la capturarea elementului: {e}")
 
-def find_slider_position(puzzle_image, slider_image):
-    puzzle = cv2.imread(puzzle_image, 0)
-    slider = cv2.imread(slider_image, 0)
-    result = cv2.matchTemplate(puzzle, slider, cv2.TM_CCOEFF_NORMED)
-    _, _, _, max_loc = cv2.minMaxLoc(result)
-    return max_loc[0]
+def preprocess_image(image_path):
+    """Preprocesează imaginea pentru a îmbunătăți potrivirea."""
+    image = cv2.imread(image_path, 0)  # Convertim în grayscale
+    if image is None:
+        raise FileNotFoundError(f"[ERROR] Imaginea nu a fost găsită: {image_path}")
+    image = cv2.GaussianBlur(image, (5, 5), 0)  # Reducem zgomotul
+    return image
+
+def find_slider_position_advanced(puzzle_image, slider_image):
+    """Găsește poziția slider-ului folosind OpenCV cu pre-procesare."""
+    try:
+        puzzle = preprocess_image(puzzle_image)
+        slider = preprocess_image(slider_image)
+
+        # Normalizează dimensiunile imaginii slider-ului dacă este necesar
+        if puzzle.shape[0] < slider.shape[0]:
+            slider = cv2.resize(slider, (puzzle.shape[1], puzzle.shape[0]))
+
+        # Găsește potrivirea
+        result = cv2.matchTemplate(puzzle, slider, cv2.TM_CCOEFF_NORMED)
+        _, _, _, max_loc = cv2.minMaxLoc(result)
+        return max_loc[0]  # Poziția X unde slider-ul trebuie mutat
+    except Exception as e:
+        print(f"[ERROR] Eroare la procesarea imaginilor: {e}")
+        return 0
 
 def move_slider(driver, slider_element, position):
-    action = ActionChains(driver)
-    action.click_and_hold(slider_element).pause(0.5)
-    action.move_by_offset(position, 0).pause(0.5)
-    action.release().perform()
+    """Mută slider-ul la poziția specificată cu o mișcare precisă."""
+    try:
+        action = ActionChains(driver)
+        action.click_and_hold(slider_element).pause(0.5)
+
+        # Mută slider-ul în pași mici pentru a simula interacțiunea umană
+        step = position // 10
+        for _ in range(10):
+            action.move_by_offset(step, 0).pause(0.2)
+        action.release().perform()
+        print("[INFO] Slider mutat cu succes.")
+    except Exception as e:
+        print(f"[ERROR] Eroare la mutarea slider-ului: {e}")
 
 def solve_captcha():
+    """Rezolvă CAPTCHA-ul cu slider utilizând OpenCV."""
     try:
-        puzzle_element = driver.find_element(By.CSS_SELECTOR, "div.puzzle-container")
-        slider_element = driver.find_element(By.CSS_SELECTOR, "div.slider-container")
-        capture_element_screenshot(puzzle_element, "puzzle.png")
-        capture_element_screenshot(slider_element, "slider.png")
-        position = find_slider_position("puzzle.png", "slider.png")
+        # Așteaptă puzzle-ul și slider-ul
+        puzzle_element = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "//img[contains(@src, 'captcha')]"))
+        )
+        slider_element = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "//div[@draggable='true']"))
+        )
+
+        # Capturează imaginile
+        puzzle_image_path = "puzzle_image.png"
+        slider_image_path = "slider_image.png"
+        capture_element_screenshot(puzzle_element, puzzle_image_path)
+        capture_element_screenshot(slider_element, slider_image_path)
+
+        # Găsește poziția slider-ului
+        position = find_slider_position_advanced(puzzle_image_path, slider_image_path)
+
+        if position == 0:
+            print("[ERROR] Poziția slider-ului nu a putut fi determinată.")
+            return
+
+        # Mută slider-ul
         move_slider(driver, slider_element, position)
+
         print("[INFO] CAPTCHA rezolvat cu succes.")
     except Exception as e:
         print(f"[ERROR] Eroare la rezolvarea CAPTCHA: {e}")
+
 
 def login_to_tiktok(email, password):
     try:
         driver.get("https://www.tiktok.com/login/phone-or-email/email")
         try:
-            shadow_root = driver.execute_script(
-                "return document.querySelector('tiktok-cookie-banner').shadowRoot"
+            cookie_banner = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "tiktok-cookie-banner"))
             )
+            shadow_root = driver.execute_script("return arguments[0].shadowRoot", cookie_banner)
             decline_button = shadow_root.find_element(By.CSS_SELECTOR, "button")
             if "Decline optional cookies" in decline_button.text:
                 decline_button.click()
@@ -113,5 +165,5 @@ try:
     watch_video("https://www.tiktok.com/@antonio_lucian13/video/7443079808839519490?_t=8s7fZ8zqeCU&_r=1")
     interact_with_video()
 finally:
-    driver.quit()
+    #driver.quit()
     print("[INFO] Browserul a fost închis")
