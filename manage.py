@@ -16,7 +16,7 @@ EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
 # Specifică calea către chromedriver.exe
-driver_path = "./chromedriver-win64/chromedriver.exe"  # Calea relativă
+driver_path = "./chromedriver-win64/chromedriver"  # Calea relativă
 
 # Creează un obiect Service pentru ChromeDriver
 service = Service(driver_path)
@@ -40,21 +40,16 @@ def preprocess_image(image_path):
     image = cv2.imread(image_path, 0)  # Convertim în grayscale
     if image is None:
         raise FileNotFoundError(f"[ERROR] Imaginea nu a fost găsită: {image_path}")
-    image = cv2.GaussianBlur(image, (5, 5), 0)  # Reducem zgomotul
     return image
 
 def find_slider_position_advanced(puzzle_image, slider_image):
-    """Găsește poziția slider-ului folosind OpenCV cu pre-procesare."""
+    """Găsește poziția slider-ului folosind OpenCV."""
     try:
         puzzle = preprocess_image(puzzle_image)
         slider = preprocess_image(slider_image)
 
-        # Normalizează dimensiunile imaginii slider-ului dacă este necesar
-        if puzzle.shape[0] < slider.shape[0]:
-            slider = cv2.resize(slider, (puzzle.shape[1], puzzle.shape[0]))
-
-        # Găsește potrivirea
-        result = cv2.matchTemplate(puzzle, slider, cv2.TM_CCOEFF_NORMED)
+        # Aplicăm potrivirea mai rapidă
+        result = cv2.matchTemplate(puzzle, slider, cv2.TM_CCORR_NORMED)
         _, _, _, max_loc = cv2.minMaxLoc(result)
         return max_loc[0]  # Poziția X unde slider-ul trebuie mutat
     except Exception as e:
@@ -62,16 +57,21 @@ def find_slider_position_advanced(puzzle_image, slider_image):
         return 0
 
 def move_slider(driver, slider_element, position):
-    """Mută slider-ul la poziția specificată cu o mișcare precisă."""
+    """Mută slider-ul direct la poziția specificată."""
     try:
         action = ActionChains(driver)
-        action.click_and_hold(slider_element).pause(0.5)
+        action.click_and_hold(slider_element).pause(0.1)
 
-        # Mută slider-ul în pași mici pentru a simula interacțiunea umană
-        step = position // 10
-        for _ in range(10):
-            action.move_by_offset(step, 0).pause(0.2)
+        # Mută slider-ul în pași mari cu pauze foarte scurte
+        steps = 5
+        step_size = position // steps
+        for _ in range(steps):
+            action.move_by_offset(step_size, 0).pause(0.05)
+        remaining_offset = position % steps
+        if remaining_offset:
+            action.move_by_offset(remaining_offset, 0).pause(0.05)
         action.release().perform()
+
         print("[INFO] Slider mutat cu succes.")
     except Exception as e:
         print(f"[ERROR] Eroare la mutarea slider-ului: {e}")
@@ -106,7 +106,6 @@ def solve_captcha():
         print("[INFO] CAPTCHA rezolvat cu succes.")
     except Exception as e:
         print(f"[ERROR] Eroare la rezolvarea CAPTCHA: {e}")
-
 
 def login_to_tiktok(email, password):
     try:
@@ -165,5 +164,4 @@ try:
     watch_video("https://www.tiktok.com/@antonio_lucian13/video/7443079808839519490?_t=8s7fZ8zqeCU&_r=1")
     interact_with_video()
 finally:
-    #driver.quit()
     print("[INFO] Browserul a fost închis")
